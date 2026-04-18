@@ -191,10 +191,8 @@ class AuthController extends BaseController
         
         
 
-        $_SESSION['success'] = "Account created successfully! Welcome to the Event Management System.";
-        // $this->redirect('/event-reports/dashboard');
-        header("Location: http://localhost/event-reports/dashboard");
-        exit;
+      $_SESSION['success'] = "Account created successfully! Welcome to the Event Management System.";
+return $this->redirect('/event-reports/dashboard');
     }
 
 
