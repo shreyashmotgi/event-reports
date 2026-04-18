@@ -131,7 +131,7 @@
                         <div class="d-flex gap-3 ">
                             <?php if ($existingInvitation): ?>
                                 <button type="submit" class="btn btn-warning btn-lg px-5">Update Invitation</button>
-                                <a href="<?= Url::to("/documents/view/invitation/$checklist_id") ?>" class="btn btn-info btn-lg px-5">
+                                <a href="<?= Url::to("/documents/view/invitation/$checklist_id?page=$page") ?>" class="btn btn-info btn-lg px-5">
                                     View Invitation
                                 </a>
                             <?php else: ?>
