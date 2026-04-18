@@ -142,7 +142,6 @@ Principal
 <?php if(!empty($canAccessButtons)): ?>
 <div>
     <a href="<?= Url::to('/documents/event-report/' . $checklist_id) ?>" class="btn btn-secondary">Edit Event Report</a>
-    <a href="/event-reports/controllers/documents/download_word.php?checklist_id=<?= $checklist_id ?>" class="btn btn-primary">Download Word</a>
     <a href="<?= Url::to('/documents/download/' . $checklist_id) ?>" class="btn btn-primary"> Download PDF</a>
 </div>
 <?php endif; ?>
