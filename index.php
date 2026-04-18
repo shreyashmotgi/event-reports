@@ -2,51 +2,53 @@
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-/**
- * ---------------------------
- * DEBUG CONFIG
- * ---------------------------
- */
-$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);
-
-// Force error reporting
+// 🔴 SHOW ALL ERRORS   
 error_reporting(E_ALL);
+ini_set('display_errors', 1);
 
-// Show errors ONLY if debug is true
-ini_set('display_errors', $debug ? '1' : '0');
-ini_set('display_startup_errors', $debug ? '1' : '0');
+echo "<h2>🚀 DEBUG START</h2>";
 
-// ALWAYS log errors (important for Render logs)
-ini_set('log_errors', '1');
-ini_set('error_log', 'php://stderr'); // Render reads stderr logs
+// 🔹 STEP 1: Check PHP working
+echo "✅ STEP 1: PHP is working<br>";
 
-/**
- * ---------------------------
- * GLOBAL ERROR HANDLERS
- * ---------------------------
- */
+// 🔹 STEP 2: Show environment variables
+echo "<h3>ENV VARIABLES:</h3>";
 
-// Catch normal PHP errors
-set_error_handler(function ($severity, $message, $file, $line) {
-    error_log("ERROR [$severity] $message in $file on line $line");
-});
+$host = getenv('MYSQLHOST');
+$user = getenv('MYSQLUSER');
+$pass = getenv('MYSQLPASSWORD');
+$db   = getenv('MYSQLDATABASE');
+$port = getenv('MYSQLPORT');
 
-// Catch uncaught exceptions
-set_exception_handler(function ($exception) {
-    error_log("EXCEPTION: " . $exception->getMessage());
-    error_log($exception->getTraceAsString());
+echo "HOST: " . ($host ?: "❌ NOT FOUND") . "<br>";
+echo "USER: " . ($user ?: "❌ NOT FOUND") . "<br>";
+echo "DB: " . ($db ?: "❌ NOT FOUND") . "<br>";
+echo "PORT: " . ($port ?: "❌ NOT FOUND") . "<br>";
 
-    http_response_code(500);
-    echo "Internal Server Error";
-});
+// 🔹 STEP 3: Try DB connection
+echo "<h3>DB CONNECTION:</h3>";
 
-// Catch fatal errors (VERY IMPORTANT)
-register_shutdown_function(function () {
-    $error = error_get_last();
-    if ($error !== NULL) {
-        error_log("FATAL ERROR: " . print_r($error, true));
-    }
-});
+$conn = @new mysqli($host, $user, $pass, $db, $port);
+
+if ($conn->connect_error) {
+    echo "❌ DB ERROR: " . $conn->connect_error . "<br>";
+} else {
+    echo "✅ DB Connected Successfully<br>";
+}
+
+// 🔹 STEP 4: Simple query test
+echo "<h3>QUERY TEST:</h3>";
+
+$result = $conn->query("SHOW TABLES");
+
+if (!$result) {
+    echo "❌ Query Failed: " . $conn->error . "<br>";
+} else {
+    echo "✅ Query Success<br>";
+}
+
+// 🔹 END
+echo "<h2>🏁 DEBUG END</h2>";
 
 /**
  * ---------------------------
