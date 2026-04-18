@@ -1,1 +1,80 @@
-<?php require_once __DIR__ . '/vendor/autoload.php'; // Security Headers if (!headers_sent()) { header("X-Frame-Options: SAMEORIGIN"); header("X-Content-Type-Options: nosniff"); header("X-XSS-Protection: 1; mode=block"); header("Referrer-Policy: strict-origin-when-cross-origin"); header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.ckeditor.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self';");} // Session require_once __DIR__ . '/init/session.php'; $debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN); ini_set('display_errors', $debug ? '1' : '0'); ini_set('display_startup_errors', $debug ? '1' : '0'); error_reporting($debug ? E_ALL : 0); // Load DB + cleanup require_once __DIR__ . '/init/_dbconnect.php'; require_once __DIR__ . '/init/event_cleanup.php'; // Router $router = require_once __DIR__ . '/config/routes.php'; if (!is_object($router) || !method_exists($router, 'dispatch')) { throw new RuntimeException('Router not initialized correctly.'); } $router->dispatch(); exit;
+<?php
+
+require_once __DIR__ . '/vendor/autoload.php';
+
+/**
+ * ----------------------------------------
+ * Security Headers
+ * ----------------------------------------
+ */
+if (!headers_sent()) {
+    header("X-Frame-Options: SAMEORIGIN");
+    header("X-Content-Type-Options: nosniff");
+    header("X-XSS-Protection: 1; mode=block");
+    header("Referrer-Policy: strict-origin-when-cross-origin");
+
+    header("
+        Content-Security-Policy: 
+        default-src 'self'; 
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' 
+            https://cdn.jsdelivr.net 
+            https://cdnjs.cloudflare.com 
+            https://cdn.ckeditor.com; 
+        style-src 'self' 'unsafe-inline' 
+            https://fonts.googleapis.com 
+            https://cdn.jsdelivr.net 
+            https://cdnjs.cloudflare.com; 
+        font-src 'self' 
+            https://fonts.gstatic.com 
+            https://cdn.jsdelivr.net; 
+        img-src 'self' data: blob: https:; 
+        connect-src 'self' https://cdn.jsdelivr.net; 
+        frame-ancestors 'self';
+    ");
+}
+
+/**
+ * ----------------------------------------
+ * Session Initialization
+ * ----------------------------------------
+ */
+require_once __DIR__ . '/init/session.php';
+
+/**
+ * ----------------------------------------
+ * Debug Configuration
+ * ----------------------------------------
+ */
+$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);
+
+ini_set('display_errors', $debug ? '1' : '0');
+ini_set('display_startup_errors', $debug ? '1' : '0');
+error_reporting($debug ? E_ALL : 0);
+
+/**
+ * ----------------------------------------
+ * Database & Cleanup
+ * ----------------------------------------
+ */
+require_once __DIR__ . '/init/_dbconnect.php';
+require_once __DIR__ . '/init/event_cleanup.php';
+
+/**
+ * ----------------------------------------
+ * Router Initialization
+ * ----------------------------------------
+ */
+$router = require_once __DIR__ . '/config/routes.php';
+
+if (!is_object($router) || !method_exists($router, 'dispatch')) {
+    throw new RuntimeException('Router not initialized correctly.');
+}
+
+/**
+ * ----------------------------------------
+ * Dispatch Request
+ * ----------------------------------------
+ */
+$router->dispatch();
+
+exit;
