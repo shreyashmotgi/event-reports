@@ -288,7 +288,7 @@ class InviteController extends BaseController
 
         if (!$invitation) {
             // If no invitation for this guest, redirect to manage page for this guest
-            $this->redirect('/documents/invitation?checklist_id=' . $checklist_id . '&page=' . $page . '&error=no_invitation');
+            $this->redirect('/documents/invitation/' . $checklist_id . '?page=' . $page . '&error=no_invitation');
         }
 
         // Handle department header logic
