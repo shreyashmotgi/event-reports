@@ -43,14 +43,14 @@ private function validateName($value)
 
 private function validateCompany($value)
 {
-    return preg_match('/^[a-zA-Z0-9\s\.\&\-]+$/', $value);
+    return preg_match('/^[a-zA-Z0-9\s\.\&\-,()\/]+$/u', $value);
 }
 
 private function validateDesignation($value)
 {
-    return preg_match('/^[a-zA-Z0-9\s\.\-]+$/', $value);
+    return preg_match('/^[a-zA-Z0-9\s\.\-\/,&()]+$/u', $value);
 }
-
+    
 private function validatePhone($value)
 {
     return preg_match('/^[0-9]{10}$/', $value);
