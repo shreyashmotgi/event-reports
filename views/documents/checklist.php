@@ -400,5 +400,5 @@ document.getElementById('multi_day').addEventListener('change', function(){
 })();
 </script>
 
-<script src="/event-reports/public/js/checklistValidation.js"></script>
+<script src="/public/js/checklistValidation.js"></script>
 <?php require_once __DIR__ . '/../../views/includes/footer.php'; ?>
