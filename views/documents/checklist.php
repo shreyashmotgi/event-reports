@@ -180,7 +180,7 @@ $form_action = $edit_mode ? '/event-reports/documents/checklist/update' : '/even
                 <label class="form-check-label" for="inv_<?= $inv ?>"><?= $inv ?></label>
             </div>
         <?php endforeach; ?>
-
+        <br><br>
         <!-- COMMUNICATION -->
         <div class="form-check mb-3">
             <input type="checkbox" class="form-check-input" name="communication" id="communication" <?= !empty($checklist_data['communication']) ? 'checked' : '' ?>>
