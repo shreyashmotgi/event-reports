@@ -446,53 +446,32 @@ if (!empty($user['department_id'])) {
 
         error_log("STEP 7: OTP SAVED");
 
-        // ✅ 6️⃣ LOAD EMAIL CONFIG
-        error_log("STEP 8: Loading MAIL config");
+       // ✅ 6️⃣ SEND EMAIL VIA BREVO
+error_log("STEP 8: Sending email via Brevo...");
 
-        $mailHost = getenv('MAIL_HOST');
-        $mailPort = getenv('MAIL_PORT');
-        $mailUsername = getenv('MAIL_USERNAME');
-        $mailPassword = getenv('MAIL_PASSWORD');
-        $mailEncryption = getenv('MAIL_ENCRYPTION');
-        $mailFrom = getenv('MAIL_FROM');
-        $mailFromName = getenv('MAIL_FROM_NAME');
-
-        error_log("MAIL_HOST: " . $mailHost);
-        error_log("MAIL_PORT: " . $mailPort);
-        error_log("MAIL_USERNAME: " . $mailUsername);
-
-        if (empty($mailHost) || empty($mailPort) || empty($mailUsername) || empty($mailPassword)) {
-            error_log("STEP 8 ERROR: MAIL CONFIG MISSING");
-
-            return $this->constantTimeResponse(
-                $startTime,
-                '/event-reports/verify-otp?success=If details are correct, OTP has been sent'
-            );
-        }
-
-        // ✅ 7️⃣ SEND EMAIL
-        error_log("STEP 9: Preparing PHPMailer");
-
-        error_log("STEP 9: Sending email via Resend...");
-
-$apiKey = $_ENV['RESEND_API_KEY'] ?? null;
+$apiKey = getenv('BREVO_API_KEY');
 
 if (!$apiKey) {
-    error_log("❌ RESEND API KEY MISSING");
-    throw new Exception("Resend API key not found");
+    error_log("❌ BREVO API KEY MISSING");
+    throw new Exception("Brevo API key not found");
 }
 
 $ch = curl_init();
 
-curl_setopt($ch, CURLOPT_URL, "https://api.resend.com/emails");
+curl_setopt($ch, CURLOPT_URL, "https://api.brevo.com/v3/smtp/email");
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_POST, true);
 
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-    "from" => "onboarding@resend.dev", // temporary sender
-    "to" => [$recovery_email],
+    "sender" => [
+        "name" => "Event Portal",
+        "email" => getenv('MAIL_FROM')
+    ],
+    "to" => [
+        ["email" => $recovery_email]
+    ],
     "subject" => "OTP for Password Reset",
-    "html" => "
+    "htmlContent" => "
         Hello <b>{$email}</b>,<br><br>
         Your OTP is: <b>{$otp}</b><br>
         Valid for " . getenv('OTP_EXPIRY_MINUTES') . " minutes.<br><br>
@@ -500,8 +479,9 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
 ]));
 
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    "Authorization: Bearer " . $apiKey,
-    "Content-Type: application/json"
+    "accept: application/json",
+    "api-key: " . $apiKey,
+    "content-type: application/json"
 ]);
 
 $response = curl_exec($ch);
@@ -514,14 +494,14 @@ if (curl_errno($ch)) {
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
-error_log("Resend response: " . $response);
+error_log("Brevo response: " . $response);
 error_log("HTTP Code: " . $httpCode);
 
-if ($httpCode !== 200) {
-    throw new Exception("Resend API failed");
+if ($httpCode !== 201) {
+    throw new Exception("Brevo API failed");
 }
 
-error_log("✅ EMAIL SENT VIA RESEND");
+error_log("✅ EMAIL SENT VIA BREVO");
 
         error_log("STEP 9 SUCCESS: EMAIL SENT");
 
