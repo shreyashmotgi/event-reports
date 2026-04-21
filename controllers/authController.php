@@ -464,18 +464,49 @@ curl_setopt($ch, CURLOPT_POST, true);
 
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
     "sender" => [
-        "name" => "Event Portal",
+        "name" => "Keystone School of Engineering ",
         "email" => getenv('MAIL_FROM')
     ],
     "to" => [
         ["email" => $recovery_email]
     ],
-    "subject" => "OTP for Password Reset",
-    "htmlContent" => "
-        Hello <b>{$email}</b>,<br><br>
-        Your OTP is: <b>{$otp}</b><br>
-        Valid for " . getenv('OTP_EXPIRY_MINUTES') . " minutes.<br><br>
-    "
+"subject" => "Password Reset OTP - Keystone School of Engineering",
+
+"htmlContent" => "
+<div style='font-family: Arial, sans-serif; line-height:1.6; color:#333;'>
+
+    <h2 style='color:#2c3e50;'>Keystone School of Engineering</h2>
+    <p style='font-size:14px;'>Event Documentation Portal</p>
+
+    <hr>
+
+    <p>Hello,</p>
+
+    <p>You requested to reset your password. Use the OTP below to proceed:</p>
+
+    <div style='margin:20px 0; padding:15px; background:#f4f6f8; border-radius:8px; text-align:center;'>
+        <span style='font-size:24px; font-weight:bold; letter-spacing:3px; color:#2c3e50;'>
+            {$otp}
+        </span>
+    </div>
+
+    <p>This OTP is valid for <b>" . (getenv('OTP_EXPIRY_MINUTES') ?: 10) . " minutes</b>.</p>
+
+    <p>If you did not request this, please ignore this email.</p>
+
+    <br>
+
+    <p>Regards,<br>
+    <b>Keystone Event Portal Team</b></p>
+
+    <hr>
+
+    <p style='font-size:12px; color:#888;'>
+        This is an automated email. Please do not reply.
+    </p>
+
+</div>
+"
 ]));
 
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
