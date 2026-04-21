@@ -51,7 +51,7 @@ CREATE TABLE users (
     sign_image VARCHAR(255) DEFAULT NULL,
     sign_public_id VARCHAR(255),
 
-    reset_otp VARCHAR(6) DEFAULT NULL,
+    reset_otp VARCHAR(255) DEFAULT NULL,
     reset_otp_expiry DATETIME DEFAULT NULL,
     reset_otp_attempts INT DEFAULT 0,
     reset_otp_last_sent DATETIME DEFAULT NULL,
