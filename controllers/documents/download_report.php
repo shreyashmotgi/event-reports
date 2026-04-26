@@ -1,12 +1,16 @@
 <?php
 /**
  * Download Event Report as PDF using TCPDF
- * Generates a real PDF file and sends it as a download
+ * - Header image on EVERY page
+ * - Cloudinary image URLs supported
+ * - Layout mirrors view_eventreport.php exactly
  */
+
 // -------------------- SESSION --------------------
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
 // -------------------- DB --------------------
 $conn = new mysqli(
     getenv('DB_HOST'),
@@ -15,25 +19,26 @@ $conn = new mysqli(
     getenv('DB_NAME'),
     getenv('DB_PORT') ?: 3306
 );
-// VERY IMPORTANT FOR RAILWAY
 $conn->options(MYSQLI_OPT_CONNECT_TIMEOUT, 5);
 if ($conn->connect_error) {
     die("DB Error: " . $conn->connect_error);
 }
+
 // -------------------- CHECKLIST ID --------------------
 $checklist_id = $_GET['id'] ?? null;
-if(!$checklist_id){
+if (!$checklist_id) {
     die("Checklist ID Missing");
 }
 
-function normalizePath($path){
+// -------------------- HELPERS --------------------
+
+function normalizePath($path) {
     $path = str_replace('/event-reports/public/', '', $path);
-    $path = str_replace('/event-reports/public/', '', $path);
-    return ltrim($path,'/');
+    return ltrim($path, '/');
 }
 
 /**
- * Return full Cloudinary URL as-is (or fallback if needed)
+ * Return full Cloudinary URL as-is, or build absolute URL for relative paths.
  */
 function buildImagePath($image_value) {
     if (empty($image_value)) return '';
@@ -43,408 +48,553 @@ function buildImagePath($image_value) {
     return 'https://event-reports-production.up.railway.app/' . ltrim($image_value, '/');
 }
 
+/**
+ * Download a remote image URL into a temp file and return its local path.
+ * TCPDF renders remote images much more reliably when given a local file.
+ * Returns '' if the download fails.
+ */
+function fetchImageToTemp($url) {
+    if (empty($url)) return '';
+
+    $ext = 'jpg';
+    if (preg_match('/\.(png|gif|webp|jpeg|jpg)(\?|$)/i', $url, $m)) {
+        $ext = strtolower($m[1]);
+    }
+
+    $tmpFile = tempnam(sys_get_temp_dir(), 'er_img_') . '.' . $ext;
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_USERAGENT      => 'Mozilla/5.0',
+    ]);
+    $data = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($data && $httpCode === 200) {
+        file_put_contents($tmpFile, $data);
+        return $tmpFile;
+    }
+
+    @unlink($tmpFile);
+    return '';
+}
+
 // -------------------- FETCH DATA --------------------
 try {
-    $er_stmt = $conn->prepare("SELECT * FROM event_report WHERE checklist_id=?");
-    $er_stmt->bind_param("s",$checklist_id);
+    // Event Report
+    $er_stmt = $conn->prepare("SELECT * FROM event_report WHERE checklist_id = ?");
+    $er_stmt->bind_param("s", $checklist_id);
     $er_stmt->execute();
     $event = $er_stmt->get_result()->fetch_assoc();
-    if(!$event){
-        die("No Event Report Found");
-    }
+    if (!$event) die("No Event Report Found");
+
+    // Checklist
     $chk_stmt = $conn->prepare("
         SELECT programme_name, programme_date, multi_day,
                programme_start_date, programme_end_date,
                department, created_by
-        FROM checklists
-        WHERE id=?
+        FROM checklists WHERE id = ?
     ");
-    $chk_stmt->bind_param("s",$checklist_id);
+    $chk_stmt->bind_param("s", $checklist_id);
     $chk_stmt->execute();
     $checklist = $chk_stmt->get_result()->fetch_assoc();
 
-    $notice_stmt = $conn->prepare("SELECT event_time,event_venue FROM notice WHERE checklist_id=?");
-    $notice_stmt->bind_param("s",$checklist_id);
+    // Notice
+    $notice_stmt = $conn->prepare("SELECT event_time, event_venue FROM notice WHERE checklist_id = ?");
+    $notice_stmt->bind_param("s", $checklist_id);
     $notice_stmt->execute();
     $notice = $notice_stmt->get_result()->fetch_assoc();
 
-    $guest_stmt=$conn->prepare("
-        SELECT guest_name, company_name, designation , guest_email
-        FROM checklist_guests
-        WHERE checklist_id=?
+    // Guests — all 4 columns matching view page
+    $guest_stmt = $conn->prepare("
+        SELECT guest_name, company_name, designation, guest_email
+        FROM checklist_guests WHERE checklist_id = ?
     ");
-    $guest_stmt->bind_param("s",$checklist_id);
+    $guest_stmt->bind_param("s", $checklist_id);
     $guest_stmt->execute();
-    $guest_res=$guest_stmt->get_result();
-    $guest_name=[];
-    $company_name=[];
-    $designation=[];
-    $email=[];
-   
-    while($g=$guest_res->fetch_assoc()){
-        $guest_name[]=$g['guest_name'];
-        $company_name[]=$g['company_name'];
-        $designation[]=$g['designation'];
-        $guest_email[]=$g['guest_email'];
+    $guest_res = $guest_stmt->get_result();
+    $guests = [];
+    while ($g = $guest_res->fetch_assoc()) {
+        $guests[] = $g;
     }
 
-    $deptArray = json_decode($checklist['department'], true);
+    // Department & Header Image
+    $deptArray   = json_decode($checklist['department'] ?? '[]', true) ?? [];
+    $header_image = '';
+    $dept_id      = null;
+
     $default_stmt = $conn->prepare("SELECT image FROM default_header LIMIT 1");
     $default_stmt->execute();
-    $default_row = $default_stmt->get_result()->fetch_assoc();
-    $header_image = $default_row['image'] ?? "";
-    $dept_id = null;
-    if(is_array($deptArray) && count($deptArray)==1){
-        $dept_id=$deptArray[0];
-        $dept_stmt=$conn->prepare("SELECT header_image FROM departments WHERE id=?");
-        $dept_stmt->bind_param("s",$dept_id);
+    $default_row  = $default_stmt->get_result()->fetch_assoc();
+    $header_image = $default_row['image'] ?? '';
+
+    if (is_array($deptArray) && count($deptArray) === 1) {
+        $dept_id   = $deptArray[0];
+        $dept_stmt = $conn->prepare("SELECT header_image FROM departments WHERE id = ?");
+        $dept_stmt->bind_param("s", $dept_id);
         $dept_stmt->execute();
-        $dept_row=$dept_stmt->get_result()->fetch_assoc();
-        if(!empty($dept_row['header_image'])){
-            $header_image=$dept_row['header_image'];
+        $dept_row = $dept_stmt->get_result()->fetch_assoc();
+        if (!empty($dept_row['header_image'])) {
+            $header_image = $dept_row['header_image'];
         }
     }
 
+    // Event info
     $programme_name = htmlspecialchars($checklist['programme_name']);
-    if($checklist['multi_day']){
-        $event_date=date('d-m-Y',strtotime($checklist['programme_start_date'])).
-                    " to ".
-                    date('d-m-Y',strtotime($checklist['programme_end_date']));
-    }else{
-        $event_date=date('d-m-Y',strtotime($checklist['programme_date']));
+    if (!empty($checklist['multi_day'])) {
+        $event_date = date('d-m-Y', strtotime($checklist['programme_start_date']))
+                    . ' to '
+                    . date('d-m-Y', strtotime($checklist['programme_end_date']));
+    } else {
+        $event_date = date('d-m-Y', strtotime($checklist['programme_date']));
     }
-    $event_time = !empty($notice['event_time']) ? date('h:i A',strtotime($notice['event_time'])) : "N/A";
-    $event_venue = $notice['event_venue'] ?? "N/A";
-    $photos=json_decode($event['photos'],true) ?? [];
-    $captions=json_decode($event['captions'],true) ?? [];
-   
-    $coordinator_id = $checklist['created_by'];
-    $pc_stmt = $conn->prepare("
-        SELECT username, sign_image
-        FROM users
-        WHERE id=?
-    ");
-    $pc_stmt->bind_param("s",$coordinator_id);
+    $event_time  = !empty($notice['event_time']) ? date('h:i A', strtotime($notice['event_time'])) : 'N/A';
+    $event_venue = $notice['event_venue'] ?? 'N/A';
+
+    $photos   = json_decode($event['photos']   ?? '[]', true) ?? [];
+    $captions = json_decode($event['captions'] ?? '[]', true) ?? [];
+
+    // Coordinator
+    $pc_stmt = $conn->prepare("SELECT username, sign_image FROM users WHERE id = ?");
+    $pc_stmt->bind_param("s", $checklist['created_by']);
     $pc_stmt->execute();
-    $pc = $pc_stmt->get_result()->fetch_assoc();
-    $coordinator_name = $pc['username'] ?? "Coordinator";
-    $coordinator_sign = $pc['sign_image'] ?? "";
+    $pc               = $pc_stmt->get_result()->fetch_assoc();
+    $coordinator_name = $pc['username']   ?? 'Coordinator';
+    $coordinator_sign = $pc['sign_image'] ?? '';
 
-    $hod_name="N/A";
-    $hod_sign="";
-    $deptArray = json_decode($checklist['department'] ?? '[]', true);
+    // HOD — only if single department (mirrors view page)
+    $hod_name = '';
+    $hod_sign = '';
     if (is_array($deptArray) && count($deptArray) === 1) {
-        $dept_id = $deptArray[0];
-        $hod_stmt=$conn->prepare("
-            SELECT username,sign_image
-            FROM users
-            WHERE role='hod' AND department_id=?
-            LIMIT 1
+        $hod_stmt = $conn->prepare("
+            SELECT username, sign_image FROM users
+            WHERE role = 'hod' AND department_id = ? LIMIT 1
         ");
-        $hod_stmt->bind_param("s",$dept_id);
+        $hod_stmt->bind_param("s", $dept_id);
         $hod_stmt->execute();
-        $hod=$hod_stmt->get_result()->fetch_assoc();
-        $hod_name=$hod['username'] ?? "N/A";
-        $hod_sign=$hod['sign_image'] ?? "";
+        $hod = $hod_stmt->get_result()->fetch_assoc();
+        if ($hod) {
+            $hod_name = $hod['username'];
+            $hod_sign = $hod['sign_image'] ?? '';
+        }
     }
 
-    $pr_stmt=$conn->prepare("
-        SELECT username,sign_image
-        FROM users
-        WHERE role='principal'
-        LIMIT 1
-    ");
+    // Principal
+    $pr_stmt = $conn->prepare("SELECT username, sign_image FROM users WHERE role = 'principal' LIMIT 1");
     $pr_stmt->execute();
-    $principal=$pr_stmt->get_result()->fetch_assoc();
-    $principal_name=$principal['username'] ?? "Principal";
-    $principal_sign=$principal['sign_image'] ?? "";
+    $principal      = $pr_stmt->get_result()->fetch_assoc();
+    $principal_name = $principal['username']   ?? 'Principal';
+    $principal_sign = $principal['sign_image'] ?? '';
+
 } catch (Exception $e) {
     die("Database Error: " . htmlspecialchars($e->getMessage()));
 }
-// -------------------- TCPDF --------------------
+
+// ==================== PRE-DOWNLOAD HEADER IMAGE ====================
+// Download header to a temp file so TCPDF can measure its real height
+// before any page is created. This is the KEY to making the top margin
+// correct on every single page.
+
+$HEADER_IMG_LEFT  = 15;   // mm from left edge of page
+$HEADER_IMG_TOP   = 8;    // mm from top edge of page
+$HEADER_IMG_WIDTH = 180;  // mm  (210 - 15 - 15)
+
+$PAGE_MARGIN_LEFT   = 18;
+$PAGE_MARGIN_RIGHT  = 18;
+$PAGE_MARGIN_BOTTOM = 18;
+
+$usableW = 210 - $PAGE_MARGIN_LEFT - $PAGE_MARGIN_RIGHT; // 174 mm
+
+$headerUrl     = buildImagePath($header_image);
+$headerTmpPath = '';
+$headerImgH    = 32; // safe default mm height
+
+if (!empty($headerUrl)) {
+    $headerTmpPath = fetchImageToTemp($headerUrl);
+    if ($headerTmpPath && file_exists($headerTmpPath)) {
+        $sz = @getimagesize($headerTmpPath);
+        if ($sz && $sz[0] > 0) {
+            $headerImgH = round(($sz[1] / $sz[0]) * $HEADER_IMG_WIDTH, 2);
+        }
+    }
+}
+
+// Top margin = image top offset + image height + separator gap
+$PAGE_MARGIN_TOP = $HEADER_IMG_TOP + $headerImgH + 7;
+
+// Track all temp files to clean up at the end
+$tempFiles = [];
+if ($headerTmpPath) $tempFiles[] = $headerTmpPath;
+
+// ==================== CUSTOM TCPDF CLASS ====================
 require_once __DIR__ . '/../../tcpdf/tcpdf.php';
 
-$pdf = new TCPDF(PDF_PAGE_ORIENTATION, PDF_UNIT, PDF_PAGE_FORMAT, true, 'UTF-8', false);
+class EventReportPDF extends TCPDF {
+
+    public string $hdrImgPath = '';
+    public float  $hdrImgLeft = 15;
+    public float  $hdrImgTop  = 8;
+    public float  $hdrImgW    = 180;
+    public float  $hdrImgH    = 32;
+
+    /**
+     * TCPDF calls this automatically at the top of EVERY page.
+     * Drawing the image here guarantees it appears on all pages.
+     */
+    public function Header(): void {
+        if (!empty($this->hdrImgPath) && file_exists($this->hdrImgPath)) {
+            $this->Image(
+                $this->hdrImgPath,
+                $this->hdrImgLeft,
+                $this->hdrImgTop,
+                $this->hdrImgW,
+                $this->hdrImgH,
+                '',
+                '',
+                'T',
+                false,
+                300,
+                '',
+                false,
+                false,
+                0,
+                false,
+                false,
+                false
+            );
+        }
+
+        // Thin separator line below the header image
+        $lineY = $this->hdrImgTop + $this->hdrImgH + 2;
+        $this->SetLineWidth(0.4);
+        $this->SetDrawColor(160, 160, 160);
+        $this->Line(
+            $this->hdrImgLeft,
+            $lineY,
+            $this->getPageWidth() - $this->hdrImgLeft,
+            $lineY
+        );
+        $this->SetDrawColor(0, 0, 0);
+        $this->SetLineWidth(0.2);
+    }
+
+    public function Footer(): void {
+        $this->SetY(-12);
+        $this->SetFont('helvetica', 'I', 8);
+        $this->SetTextColor(120, 120, 120);
+        $this->Cell(0, 6, 'Page ' . $this->getAliasNumPage() . ' of ' . $this->getAliasNbPages(), 0, 0, 'C');
+        $this->SetTextColor(0, 0, 0);
+    }
+}
+
+// ==================== INIT PDF ====================
+$pdf = new EventReportPDF('P', 'mm', 'A4', true, 'UTF-8', false);
 
 $pdf->SetCreator('Event Management System');
 $pdf->SetAuthor('Keystone School of Engineering');
 $pdf->SetTitle('Event Report - ' . $programme_name);
 $pdf->SetSubject('Event Report');
-$pdf->SetKeywords('Event, Report, PDF');
 
-$pdf->setPrintHeader(false);
-$pdf->setPrintFooter(false);
+// CRITICAL: both must be true for Header() to fire on every page
+$pdf->setPrintHeader(true);
+$pdf->setPrintFooter(true);
 
-$pdf->SetMargins(18, 15, 18);
-$pdf->SetAutoPageBreak(true, 15);
+// SetHeaderMargin(0) = we handle spacing ourselves via $PAGE_MARGIN_TOP
+$pdf->SetHeaderMargin(0);
+$pdf->SetFooterMargin(10);
 
-$pdf->AddPage();
-
-// Important settings for images (auto size + best quality)
+// Top margin accounts for the header image on every page
+$pdf->SetMargins($PAGE_MARGIN_LEFT, $PAGE_MARGIN_TOP, $PAGE_MARGIN_RIGHT);
+$pdf->SetAutoPageBreak(true, $PAGE_MARGIN_BOTTOM);
 $pdf->setImageScale(PDF_IMAGE_SCALE_RATIO);
-$pdf->setJPEGQuality(100);
+$pdf->setJPEGQuality(90);
 
-$pdf->SetFont('helvetica', 'B', 16);
+// Pass header image info into the instance
+$pdf->hdrImgPath = $headerTmpPath ?: '';
+$pdf->hdrImgLeft = $HEADER_IMG_LEFT;
+$pdf->hdrImgTop  = $HEADER_IMG_TOP;
+$pdf->hdrImgW    = $HEADER_IMG_WIDTH;
+$pdf->hdrImgH    = $headerImgH;
 
-// -------------------- HEADER IMAGE --------------------
-$header_image_url = buildImagePath($header_image);
-if (!empty($header_image_url)) {
-    $pdf->Image($header_image_url, 15, 12, 180, 0, '', '', 'T', false, 300);
-    $pdf->Ln(42);
-} else {
-    $pdf->Ln(12);
-}
+// ==================== HELPER FUNCTIONS ====================
 
-// -------------------- TITLE --------------------
-$pdf->SetFont('helvetica', 'B', 16);
-$pdf->Cell(0, 10, 'EVENT REPORT', 0, 1, 'C');
-$pdf->Ln(10);
-
-// -------------------- EVENT DETAILS --------------------
-$pdf->SetFont('helvetica', 'B', 12);
-$pdf->Cell(0, 8, 'Event Details', 0, 1, 'L');
-$pdf->SetFont('helvetica', '', 11);
-
-$details = [
-    'Name of Event' => $programme_name,
-    'Day & Date' => $event_date,
-    'Time' => $event_time,
-    'Venue' => htmlspecialchars($event_venue)
-];
-
-foreach ($details as $label => $value) {
+function pdfLabel(EventReportPDF $pdf, string $label, string $value): void {
     $pdf->SetFont('helvetica', 'B', 11);
-    $pdf->Cell(45, 6, $label . ':', 0, 0, 'L');
+    $pdf->Cell(45, 7, $label . ':', 0, 0, 'L');
     $pdf->SetFont('helvetica', '', 11);
-    $pdf->MultiCell(0, 6, $value, 0, 'L');
-    $pdf->Ln(2);
-}
-$pdf->Ln(5);
-
-// -------------------- GUEST TABLE --------------------
-if (!empty($guest_name)) {
-    $pdf->SetFont('helvetica', 'B', 12);
-    $pdf->Cell(0, 8, 'Guest Details', 0, 1, 'L');
-    $pdf->Ln(2);
-   
-    $pdf->SetFillColor(0, 0, 0);
-    $pdf->SetTextColor(255, 255, 255);
-    $pdf->SetFont('helvetica', 'B', 10);
-    $pdf->Cell(45, 8, 'Name', 1, 0, 'C', true);
-    $pdf->Cell(45, 8, 'Company', 1, 0, 'C', true);
-    $pdf->Cell(45, 8, 'Designation', 1, 0, 'C', true);
-    $pdf->Cell(45, 8, 'Email', 1, 1, 'C', true);
-   
-    $pdf->SetTextColor(0, 0, 0);
-   
-    $pdf->SetFont('helvetica', '', 10);
-    for ($i = 0; $i < count($guest_name); $i++) {
-        $pdf->Cell(45, 8, htmlspecialchars($guest_name[$i]), 1, 0, 'L');
-        $pdf->Cell(45, 8, htmlspecialchars($company_name[$i] ?? ''), 1, 0, 'L');
-        $pdf->Cell(45, 8, htmlspecialchars($designation[$i] ?? ''), 1, 0, 'L');
-        $pdf->Cell(45, 8, htmlspecialchars($guest_email[$i] ?? ''), 1, 1, 'L');
-    }
-   
-    $pdf->Ln(5);
+    $pdf->MultiCell(0, 7, $value, 0, 'L');
+    $pdf->Ln(1);
 }
 
-// -------------------- DESCRIPTION & CONTENT --------------------
-$sections = [
-    'Description' => $event['description'] ?? '',
-    'Activities and Highlights' => $event['activities'] ?? '',
-    'Significance' => $event['significance'] ?? '',
-    'Conclusion' => $event['conclusion'] ?? '',
-    'Faculties\' Responses & Participation' => $event['faculties_participation'] ?? ''
-];
-
-foreach ($sections as $title => $content) {
+function pdfSection(EventReportPDF $pdf, string $title, string $html): void {
+    $text = trim(strip_tags(html_entity_decode($html, ENT_QUOTES, 'UTF-8')));
+    if ($text === '') return;
     $pdf->SetFont('helvetica', 'B', 12);
     $pdf->Cell(0, 8, $title . ':', 0, 1, 'L');
     $pdf->SetFont('helvetica', '', 11);
-    $pdf->writeHTMLCell(0, 6, '', '', $content, 0, 1, false, true, 'L');
+    $pdf->writeHTMLCell(0, 6, '', '', $html, 0, 1, false, true, 'L');
     $pdf->Ln(5);
 }
 
-// -------------------- PHOTOS --------------------
-if (!empty($photos)) {
-    $pdf->Cell(0, 10, 'Photos', 0, 1, 'C');
-    $pdf->Ln(5);
+// ==================== PAGE 1 — EVENT DETAILS ====================
+$pdf->AddPage();
 
-    foreach ($photos as $i => $photo_db_value) {
-        $photo_url = buildImagePath($photo_db_value);
+// Title
+$pdf->SetFont('helvetica', 'B', 16);
+$pdf->Cell(0, 10, 'EVENT REPORT', 0, 1, 'C');
+$pdf->Ln(6);
 
-        if (empty($photo_url)) continue;
+// Basic event info
+pdfLabel($pdf, 'Name of Event', $programme_name);
+pdfLabel($pdf, 'Day & Date',    $event_date);
+pdfLabel($pdf, 'Time',          $event_time);
+pdfLabel($pdf, 'Venue',         htmlspecialchars($event_venue));
+$pdf->Ln(5);
 
-        $current_y = $pdf->GetY();
-        $page_height = $pdf->getPageHeight();
-        $margin_bottom = $pdf->getBreakMargin();
+// ── Guest Details Table ─────────────────────────────────────────
+if (!empty($guests)) {
+    $pdf->SetFont('helvetica', 'B', 12);
+    $pdf->Cell(0, 8, 'Guest Details', 0, 1, 'L');
+    $pdf->Ln(2);
 
-        if ($current_y + 120 > $page_height - $margin_bottom) {
+    // Column widths — must sum to $usableW (174 mm)
+    $colW    = [42, 48, 42, 42];
+    $headers = ['Name', 'Company / Organization', 'Designation', 'Email'];
+
+    // Header row
+    $pdf->SetFillColor(45, 62, 80);
+    $pdf->SetTextColor(255, 255, 255);
+    $pdf->SetFont('helvetica', 'B', 10);
+    $pdf->SetLineWidth(0.3);
+    foreach ($headers as $i => $h) {
+        $pdf->Cell($colW[$i], 8, $h, 1, 0, 'C', true);
+    }
+    $pdf->Ln();
+
+    // Data rows with alternating shading
+    $pdf->SetTextColor(20, 20, 20);
+    $pdf->SetFont('helvetica', '', 10);
+
+    foreach ($guests as $rowIdx => $g) {
+        $row = [
+            $g['guest_name']   ?? '',
+            $g['company_name'] ?? '—',
+            $g['designation']  ?? '—',
+            $g['guest_email']  ?? '—',
+        ];
+
+        // Calculate row height: tallest cell determines row height
+        $rowH = 7;
+        foreach ($row as $ci => $cellText) {
+            $lines = $pdf->getNumLines($cellText, $colW[$ci] - 2);
+            $h     = max(7, $lines * 6);
+            if ($h > $rowH) $rowH = $h;
+        }
+
+        // Page break check before drawing row
+        if ($pdf->GetY() + $rowH > ($pdf->getPageHeight() - $PAGE_MARGIN_BOTTOM)) {
             $pdf->AddPage();
         }
 
-        // $pdf->SetX(55);
-        
-        // Auto size (width 100, height 0 = preserve aspect ratio)
-        // Desired width
-        $img_width = 100;
+        if ($rowIdx % 2 === 0) {
+            $pdf->SetFillColor(240, 244, 248);
+        } else {
+            $pdf->SetFillColor(255, 255, 255);
+        }
 
-// Safe image size fetch
-$img_info = @getimagesize($photo_url);
-
-if ($img_info) {
-    list($original_width, $original_height) = $img_info;
-} else {
-    $original_width = 100;
-    $original_height = 100;
-}
-
-// Calculate proportional height
-$img_height = ($original_height / $original_width) * $img_width;
-
-// Limit height (no distortion)
-$max_height = 120;
-if ($img_height > $max_height) {
-    $ratio = $max_height / $img_height;
-    $img_height = $max_height;
-    $img_width = $img_width * $ratio;
-}
-
-// Page break check
-$current_y = $pdf->GetY();
-$page_height = $pdf->getPageHeight();
-$margin_bottom = $pdf->getBreakMargin();
-
-if ($current_y + $img_height + 20 > $page_height - $margin_bottom) {
-    $pdf->AddPage();
-}
-
-// Center image
-$pdf->SetX((210 - $img_width) / 2);
-
-// Draw image
-$pdf->Image($photo_url, '', '', $img_width, $img_height);
-
-// Move cursor
-$pdf->Ln($img_height + 5);
-
-// Caption
-$pdf->SetFont('helvetica', 'I', 10);
-$pdf->Cell(0, 5, htmlspecialchars($captions[$i] ?? ""), 0, 1, 'C');
-$pdf->Ln(8);
+        foreach ($row as $ci => $cellText) {
+            $pdf->MultiCell($colW[$ci], $rowH, $cellText, 1, 'L', true, 0, '', '', true, 0, false, true, $rowH, 'M');
+        }
+        $pdf->Ln();
     }
+
+    $pdf->SetTextColor(0, 0, 0);
+    $pdf->SetFillColor(255, 255, 255);
+    $pdf->Ln(5);
+}
+
+// ── Text Sections ───────────────────────────────────────────────
+$sections = [
+    'Description'                          => $event['description']           ?? '',
+    'Activities and Highlights'            => $event['activities']             ?? '',
+    'Significance'                         => $event['significance']           ?? '',
+    'Conclusion'                           => $event['conclusion']             ?? '',
+    "Faculties' Responses & Participation" => $event['faculties_participation'] ?? '',
+];
+foreach ($sections as $title => $html) {
+    pdfSection($pdf, $title, $html);
+}
+
+// ==================== PHOTOS ====================
+if (!empty($photos)) {
+    $pdf->AddPage();
+
+    $pdf->SetFont('helvetica', 'B', 14);
+    $pdf->Cell(0, 10, 'Photos', 0, 1, 'C');
+    $pdf->Ln(4);
+
+    // Two-column gallery
+    $colCount = 2;
+    $gap      = 6;                                      // mm between columns
+    $imgW     = ($usableW - $gap) / $colCount;         // ~84 mm
+    $imgH     = $imgW * 0.72;                          // proportional height
+    $capSpace = 12;                                     // mm below image for caption
+    $blockH   = $imgH + $capSpace;
+
+    $col       = 0;
+    $rowStartY = $pdf->GetY();
+
+    foreach ($photos as $idx => $photo_db_value) {
+        $photo_url = buildImagePath($photo_db_value);
+        if (empty($photo_url)) continue;
+
+        // Download photo to temp file for reliable rendering
+        $tmpPhoto = fetchImageToTemp($photo_url);
+        if (!$tmpPhoto || !file_exists($tmpPhoto)) continue;
+        $tempFiles[] = $tmpPhoto;
+
+        // At the start of each new row: check if the block fits on this page
+        if ($col === 0) {
+            $rowStartY = $pdf->GetY();
+            if ($rowStartY + $blockH > ($pdf->getPageHeight() - $PAGE_MARGIN_BOTTOM)) {
+                $pdf->AddPage();
+                $rowStartY = $pdf->GetY();
+            }
+        }
+
+        $x = $PAGE_MARGIN_LEFT + $col * ($imgW + $gap);
+        $y = $rowStartY;
+
+        $pdf->Image($tmpPhoto, $x, $y, $imgW, $imgH, '', '', 'T', false, 150);
+
+        // Caption
+        $caption = trim($captions[$idx] ?? '');
+        if ($caption !== '') {
+            $pdf->SetFont('helvetica', 'I', 9);
+            $pdf->SetXY($x, $y + $imgH + 1);
+            $pdf->MultiCell($imgW, 5, $caption, 0, 'C');
+        }
+
+        $col++;
+        if ($col >= $colCount) {
+            $pdf->SetXY($PAGE_MARGIN_LEFT, $rowStartY + $blockH);
+            $col = 0;
+        }
+    }
+
+    // If last row had only one image, still move cursor down
+    if ($col !== 0) {
+        $pdf->SetXY($PAGE_MARGIN_LEFT, $rowStartY + $blockH);
+    }
+
 } else {
-    $pdf->SetFont('helvetica', '', 11);
+    $pdf->SetFont('helvetica', 'I', 11);
     $pdf->Cell(0, 10, 'No photos available.', 0, 1, 'C');
     $pdf->Ln(5);
 }
 
-// ================== PAGE BREAK FOR SIGNATURES ==================
-$current_y = $pdf->GetY();
-$page_height = $pdf->getPageHeight();
-$margin_bottom = $pdf->getBreakMargin();
-$signature_block_height = 100;
+// ==================== SIGNATURES — FINAL PAGE ====================
+$pdf->AddPage();
+$pdf->SetAutoPageBreak(false);
 
-if ($current_y + $signature_block_height > $page_height - $margin_bottom) {
-    $pdf->AddPage();
-    $margins = $pdf->getMargins();
-    $pdf->SetY($margins['top']);
-} else {
-    $pdf->Ln(8);
+$pdf->Ln(8);
+$pdf->SetFont('helvetica', 'B', 14);
+$pdf->Cell(0, 10, 'Approved By', 0, 1, 'C');
+$pdf->Ln(10);
+
+// Build signatories list — HOD only if single department (mirrors view page)
+$signatories = [];
+$signatories[] = [
+    'name'  => $coordinator_name,
+    'title' => 'Coordinator',
+    'url'   => buildImagePath($coordinator_sign),
+];
+if (!empty($hod_name) && $hod_name !== 'N/A') {
+    $signatories[] = [
+        'name'  => $hod_name,
+        'title' => 'HOD',
+        'url'   => buildImagePath($hod_sign),
+    ];
 }
-
-// -------------------- SIGNATURES --------------------
-$coordinator_path = buildImagePath($coordinator_sign);
-$hod_path         = buildImagePath($hod_sign);
-$principal_path   = buildImagePath($principal_sign);
-
-$signature_data = [
-    ['name' => $coordinator_name, 'title' => 'Coordinator', 'path' => $coordinator_path]
+$signatories[] = [
+    'name'  => $principal_name,
+    'title' => 'Principal',
+    'url'   => buildImagePath($principal_sign),
 ];
 
-if (!empty($hod_name) && $hod_name !== 'N/A') {
-    $signature_data[] = ['name' => $hod_name, 'title' => 'HOD', 'path' => $hod_path];
-}
-
-$signature_data[] = ['name' => $principal_name, 'title' => 'Principal', 'path' => $principal_path];
-
-$signature_count = count($signature_data);
-$col_width = 64;
-$sig_image_width = 36;
-$sig_y = $pdf->GetY() + 12;
-$line_y = $sig_y + 20;
-$name_y = $line_y + 6;
-$title_y = $name_y + 8;
-
-if ($signature_count == 2) {
-    $start_x = 20;
-    $right_x = $pdf->GetPageWidth() - 20 - $col_width;
-} else {
-    $start_x = ($pdf->GetPageWidth() - (3 * $col_width)) / 2;
-}
-
-// Signature images (auto height)
-foreach ($signature_data as $index => $sig) {
-    $x = ($signature_count == 2) ? (($index == 0) ? $start_x : $right_x) : ($start_x + ($index * $col_width));
-
-    if (!empty($sig['path'])) {
-        $pdf->Image(
-            $sig['path'],
-            $x + ($col_width - $sig_image_width)/2,
-            $sig_y,
-            $sig_image_width,
-            0,   // ← auto height (default behavior)
-            '',
-            '',
-            'T',
-            false,
-            300
-        );
+// Download signature images to temp files
+foreach ($signatories as &$s) {
+    $s['path'] = '';
+    if (!empty($s['url'])) {
+        $tmp = fetchImageToTemp($s['url']);
+        if ($tmp && file_exists($tmp)) {
+            $s['path']   = $tmp;
+            $tempFiles[] = $tmp;
+        }
     }
 }
+unset($s);
 
-// Horizontal lines
-$pdf->SetLineWidth(0.5);
-foreach ($signature_data as $index => $sig) {
-    $x = ($signature_count == 2) ? (($index == 0) ? $start_x : $right_x) : ($start_x + ($index * $col_width));
-    $pdf->Line($x + 8, $line_y, $x + $col_width - 8, $line_y);
+$count   = count($signatories);
+$sigColW = $usableW / $count;
+$sigSize = 35;   // mm — signature image width
+$baseY   = $pdf->GetY();
+
+foreach ($signatories as $i => $s) {
+    $x = $PAGE_MARGIN_LEFT + $i * $sigColW;
+
+    // Signature image centered in its column
+    if (!empty($s['path']) && file_exists($s['path'])) {
+        $imgX = $x + ($sigColW - $sigSize) / 2;
+        $pdf->Image($s['path'], $imgX, $baseY, $sigSize, 0, '', '', 'T', false, 300);
+    }
+
+    // Underline
+    $lineY = $baseY + $sigSize + 3;
+    $pdf->SetLineWidth(0.5);
+    $pdf->SetDrawColor(40, 40, 40);
+    $pdf->Line($x + 4, $lineY, $x + $sigColW - 4, $lineY);
+
+    // Name
+    $pdf->SetFont('helvetica', 'B', 11);
+    $pdf->SetXY($x, $lineY + 3);
+    $pdf->Cell($sigColW, 7, $s['name'], 0, 0, 'C');
+
+    // Role title
+    $pdf->SetFont('helvetica', 'I', 10);
+    $pdf->SetXY($x, $lineY + 11);
+    $pdf->Cell($sigColW, 6, $s['title'], 0, 0, 'C');
 }
 
-// Names
-$pdf->SetFont('helvetica', '', 10);
-foreach ($signature_data as $index => $sig) {
-    $x = ($signature_count == 2) ? (($index == 0) ? $start_x : $right_x) : ($start_x + ($index * $col_width));
-    $pdf->SetXY($x, $name_y);
-    $pdf->Cell($col_width, 7, $sig['name'], 0, 0, 'C');
-}
+// Institute footer — pinned to bottom of last page
+$pdf->SetY(-22);
+$pdf->SetLineWidth(0.3);
+$pdf->SetDrawColor(100, 100, 100);
+$pdf->Line($PAGE_MARGIN_LEFT, $pdf->GetY(), 210 - $PAGE_MARGIN_RIGHT, $pdf->GetY());
+$pdf->Ln(3);
+$pdf->SetFont('helvetica', '', 8);
+$pdf->SetTextColor(60, 60, 60);
+$pdf->Cell(0, 5, 'Keystone School of Engineering, Near Handewadi Chowk, Urali Devachi, Shewalewadi, Pune - 412308', 0, 1, 'C');
+$pdf->Cell(0, 5, 'www.keystoneschoolofengineering.com', 0, 1, 'C');
 
-// Titles
-$pdf->SetFont('helvetica', '', 9);
-foreach ($signature_data as $index => $sig) {
-    $x = ($signature_count == 2) ? (($index == 0) ? $start_x : $right_x) : ($start_x + ($index * $col_width));
-    $pdf->SetXY($x, $title_y);
-    $pdf->Cell($col_width, 6, $sig['title'], 0, 0, 'C');
-}
-
-$pdf->SetY($title_y + 10);
-
-// Footer
-$pdf->Ln(12);
-$pdf->SetFont('helvetica', '', 9);
-$pdf->SetLineWidth(0.4);
-$footer_y = $pdf->GetY();
-$pdf->Line(18, $footer_y, $pdf->GetPageWidth() - 18, $footer_y);
-$pdf->SetY($footer_y + 4);
-$pdf->Cell(0, 6, 'Keystone School of Engineering, Near Handewadi Chowk, Urali Devachi, Shewalewadi, Pune - 412308', 0, 1, 'C');
-$pdf->Cell(0, 6, 'www.keystoneschoolofengineering.com', 0, 1, 'C');
-$pdf->Ln(6);
-
-// -------------------- OUTPUT --------------------
+// ==================== OUTPUT ====================
 header('Content-Type: application/pdf');
 header('Content-Disposition: attachment; filename="Event_Report_' . $checklist_id . '.pdf"');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
 header('Expires: 0');
 
-echo $pdf->Output('Event_Report_' . $checklist_id . '.pdf', 'S');
+$output = $pdf->Output('Event_Report_' . $checklist_id . '.pdf', 'S');
+
+// Clean up all temp files
+foreach ($tempFiles as $tmp) {
+    if ($tmp && file_exists($tmp)) @unlink($tmp);
+}
+
+echo $output;
 exit();
