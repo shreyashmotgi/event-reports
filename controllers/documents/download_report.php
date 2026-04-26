@@ -4,6 +4,7 @@
  * - Header image on EVERY page
  * - Cloudinary image URLs supported
  * - Layout mirrors view_eventreport.php exactly
+ * - Photos: one per page, full-width, centred vertically
  */
 
 // -------------------- SESSION --------------------
@@ -196,9 +197,6 @@ try {
 }
 
 // ==================== PRE-DOWNLOAD HEADER IMAGE ====================
-// Download header to temp so TCPDF can measure its real height
-// before any page is created — ensures correct top margin on ALL pages.
-
 $HEADER_IMG_LEFT  = 15;   // mm from left edge
 $HEADER_IMG_TOP   = 8;    // mm from top edge
 $HEADER_IMG_WIDTH = 180;  // mm (210 - 15 - 15)
@@ -243,7 +241,6 @@ class EventReportPDF extends TCPDF {
 
     /**
      * Called automatically by TCPDF at the top of EVERY page.
-     * ONE separator line only — no double line.
      */
     public function Header(): void {
         if (!empty($this->hdrImgPath) && file_exists($this->hdrImgPath)) {
@@ -278,7 +275,6 @@ class EventReportPDF extends TCPDF {
             $this->getPageWidth() - $this->hdrImgLeft,
             $lineY
         );
-        // Reset so content drawing below isn't affected
         $this->SetDrawColor(0, 0, 0);
         $this->SetLineWidth(0.2);
     }
@@ -300,21 +296,17 @@ $pdf->SetAuthor('Keystone School of Engineering');
 $pdf->SetTitle('Event Report - ' . $programme_name);
 $pdf->SetSubject('Event Report');
 
-// Both must be true for Header() to fire on every page
 $pdf->setPrintHeader(true);
 $pdf->setPrintFooter(true);
 
-// SetHeaderMargin(0): we handle all spacing via $PAGE_MARGIN_TOP
 $pdf->SetHeaderMargin(0);
 $pdf->SetFooterMargin(10);
 
-// Top margin reserves space for the header image on every page
 $pdf->SetMargins($PAGE_MARGIN_LEFT, $PAGE_MARGIN_TOP, $PAGE_MARGIN_RIGHT);
 $pdf->SetAutoPageBreak(true, $PAGE_MARGIN_BOTTOM);
 $pdf->setImageScale(PDF_IMAGE_SCALE_RATIO);
 $pdf->setJPEGQuality(90);
 
-// Pass header image details into the instance
 $pdf->hdrImgPath = $headerTmpPath ?: '';
 $pdf->hdrImgLeft = $HEADER_IMG_LEFT;
 $pdf->hdrImgTop  = $HEADER_IMG_TOP;
@@ -362,11 +354,9 @@ if (!empty($guests)) {
     $pdf->Cell(0, 8, 'Guest Details', 0, 1, 'L');
     $pdf->Ln(2);
 
-    // Column widths — must sum to $usableW (174 mm)
     $colW    = [42, 48, 42, 42];
     $headers = ['Name', 'Company / Organization', 'Designation', 'Email'];
 
-    // Header row
     $pdf->SetFillColor(45, 62, 80);
     $pdf->SetTextColor(255, 255, 255);
     $pdf->SetFont('helvetica', 'B', 10);
@@ -376,7 +366,6 @@ if (!empty($guests)) {
     }
     $pdf->Ln();
 
-    // Data rows with alternating shading
     $pdf->SetTextColor(20, 20, 20);
     $pdf->SetFont('helvetica', '', 10);
 
@@ -388,7 +377,6 @@ if (!empty($guests)) {
             $g['guest_email']  ?? '—',
         ];
 
-        // Row height = tallest cell
         $rowH = 7;
         foreach ($row as $ci => $cellText) {
             $lines = $pdf->getNumLines($cellText, $colW[$ci] - 2);
@@ -396,7 +384,6 @@ if (!empty($guests)) {
             if ($h > $rowH) $rowH = $h;
         }
 
-        // Page break check before drawing row
         if ($pdf->GetY() + $rowH > ($pdf->getPageHeight() - $PAGE_MARGIN_BOTTOM)) {
             $pdf->AddPage();
         }
@@ -416,10 +403,10 @@ if (!empty($guests)) {
 
 // ── Text Sections ───────────────────────────────────────────────
 $sections = [
-    'Description'                          => $event['description']           ?? '',
-    'Activities and Highlights'            => $event['activities']             ?? '',
-    'Significance'                         => $event['significance']           ?? '',
-    'Conclusion'                           => $event['conclusion']             ?? '',
+    'Description'                          => $event['description']            ?? '',
+    'Activities and Highlights'            => $event['activities']              ?? '',
+    'Significance'                         => $event['significance']            ?? '',
+    'Conclusion'                           => $event['conclusion']              ?? '',
     "Faculties' Responses & Participation" => $event['faculties_participation'] ?? '',
 ];
 foreach ($sections as $title => $html) {
@@ -428,64 +415,41 @@ foreach ($sections as $title => $html) {
 
 // ==================== PHOTOS ====================
 if (!empty($photos)) {
-    $pdf->AddPage();
 
-    $pdf->SetFont('helvetica', 'B', 14);
-    $pdf->Cell(0, 10, 'Photos', 0, 1, 'C');
-    $pdf->Ln(4);
-
-    // Two-column gallery
-    $colCount = 2;
-    $gap      = 6;
-    $imgW     = ($usableW - $gap) / $colCount;   // ~84 mm
-    $imgH     = $imgW * 0.72;
-    $capSpace = 12;
-    $blockH   = $imgH + $capSpace;
-
-    $col       = 0;
-    $rowStartY = $pdf->GetY();
+    // ── Single-column gallery — one image per page, full-width ──
+    $imgW     = $usableW;        // full usable width ~174 mm
+    $imgH     = $imgW * 0.65;    // ~113 mm tall (landscape feel)
+    $capSpace = 14;              // space below image reserved for caption
 
     foreach ($photos as $idx => $photo_db_value) {
         $photo_url = buildImagePath($photo_db_value);
         if (empty($photo_url)) continue;
 
-        // Download photo to temp file
         $tmpPhoto = fetchImageToTemp($photo_url);
         if (!$tmpPhoto || !file_exists($tmpPhoto)) continue;
         $tempFiles[] = $tmpPhoto;
 
-        // Check if new row fits on current page
-        if ($col === 0) {
-            $rowStartY = $pdf->GetY();
-            if ($rowStartY + $blockH > ($pdf->getPageHeight() - $PAGE_MARGIN_BOTTOM)) {
-                $pdf->AddPage();
-                $rowStartY = $pdf->GetY();
-            }
-        }
+        // Each photo gets its own dedicated page
+        $pdf->AddPage();
 
-        $x = $PAGE_MARGIN_LEFT + $col * ($imgW + $gap);
-        $y = $rowStartY;
+        $pageH       = $pdf->getPageHeight();
+        $usablePageH = $pageH - $PAGE_MARGIN_TOP - $PAGE_MARGIN_BOTTOM;
+        $blockH      = $imgH + $capSpace;
 
-        $pdf->Image($tmpPhoto, $x, $y, $imgW, $imgH, '', '', 'T', false, 150);
+        // Centre the image block vertically within the usable area
+        $centredY = $PAGE_MARGIN_TOP + ($usablePageH - $blockH) / 2;
+        if ($centredY < $PAGE_MARGIN_TOP) $centredY = $PAGE_MARGIN_TOP;
 
-        // Caption
+        // Draw image — high DPI for maximum sharpness
+        $pdf->Image($tmpPhoto, $PAGE_MARGIN_LEFT, $centredY, $imgW, $imgH, '', '', 'T', false, 200);
+
+        // Caption centred beneath the image
         $caption = trim($captions[$idx] ?? '');
         if ($caption !== '') {
-            $pdf->SetFont('helvetica', 'I', 9);
-            $pdf->SetXY($x, $y + $imgH + 1);
-            $pdf->MultiCell($imgW, 5, $caption, 0, 'C');
+            $pdf->SetFont('helvetica', 'I', 10);
+            $pdf->SetXY($PAGE_MARGIN_LEFT, $centredY + $imgH + 3);
+            $pdf->MultiCell($imgW, 6, $caption, 0, 'C');
         }
-
-        $col++;
-        if ($col >= $colCount) {
-            $pdf->SetXY($PAGE_MARGIN_LEFT, $rowStartY + $blockH);
-            $col = 0;
-        }
-    }
-
-    // Last row had only one image
-    if ($col !== 0) {
-        $pdf->SetXY($PAGE_MARGIN_LEFT, $rowStartY + $blockH);
     }
 
 } else {
@@ -498,10 +462,8 @@ if (!empty($photos)) {
 $pdf->AddPage();
 $pdf->SetAutoPageBreak(false);
 
-// ── No "Approved By" heading — straight to signatures ──────────
 $pdf->Ln(20);
 
-// Build signatories — HOD only if single department
 $signatories = [];
 $signatories[] = [
     'name'  => $coordinator_name,
@@ -521,7 +483,6 @@ $signatories[] = [
     'url'   => buildImagePath($principal_sign),
 ];
 
-// Download signature images to temp files
 foreach ($signatories as &$s) {
     $s['path'] = '';
     if (!empty($s['url'])) {
@@ -542,24 +503,20 @@ $baseY   = $pdf->GetY();
 foreach ($signatories as $i => $s) {
     $x = $PAGE_MARGIN_LEFT + $i * $sigColW;
 
-    // Signature image centered in column
     if (!empty($s['path']) && file_exists($s['path'])) {
         $imgX = $x + ($sigColW - $sigSize) / 2;
         $pdf->Image($s['path'], $imgX, $baseY, $sigSize, 0, '', '', 'T', false, 300);
     }
 
-    // Underline
     $lineY = $baseY + $sigSize + 3;
     $pdf->SetLineWidth(0.5);
     $pdf->SetDrawColor(40, 40, 40);
     $pdf->Line($x + 4, $lineY, $x + $sigColW - 4, $lineY);
 
-    // Name
     $pdf->SetFont('helvetica', 'B', 11);
     $pdf->SetXY($x, $lineY + 3);
     $pdf->Cell($sigColW, 7, $s['name'], 0, 0, 'C');
 
-    // Role
     $pdf->SetFont('helvetica', 'I', 10);
     $pdf->SetXY($x, $lineY + 11);
     $pdf->Cell($sigColW, 6, $s['title'], 0, 0, 'C');
