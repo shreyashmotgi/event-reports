@@ -71,7 +71,7 @@ function fetchImageToTemp($url) {
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_USERAGENT      => 'Mozilla/5.0',
     ]);
-    $data = curl_exec($ch);
+    $data     = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
@@ -118,13 +118,13 @@ try {
     $guest_stmt->bind_param("s", $checklist_id);
     $guest_stmt->execute();
     $guest_res = $guest_stmt->get_result();
-    $guests = [];
+    $guests    = [];
     while ($g = $guest_res->fetch_assoc()) {
         $guests[] = $g;
     }
 
     // Department & Header Image
-    $deptArray   = json_decode($checklist['department'] ?? '[]', true) ?? [];
+    $deptArray    = json_decode($checklist['department'] ?? '[]', true) ?? [];
     $header_image = '';
     $dept_id      = null;
 
@@ -196,13 +196,12 @@ try {
 }
 
 // ==================== PRE-DOWNLOAD HEADER IMAGE ====================
-// Download header to a temp file so TCPDF can measure its real height
-// before any page is created. This is the KEY to making the top margin
-// correct on every single page.
+// Download header to temp so TCPDF can measure its real height
+// before any page is created — ensures correct top margin on ALL pages.
 
-$HEADER_IMG_LEFT  = 15;   // mm from left edge of page
-$HEADER_IMG_TOP   = 8;    // mm from top edge of page
-$HEADER_IMG_WIDTH = 180;  // mm  (210 - 15 - 15)
+$HEADER_IMG_LEFT  = 15;   // mm from left edge
+$HEADER_IMG_TOP   = 8;    // mm from top edge
+$HEADER_IMG_WIDTH = 180;  // mm (210 - 15 - 15)
 
 $PAGE_MARGIN_LEFT   = 18;
 $PAGE_MARGIN_RIGHT  = 18;
@@ -224,8 +223,8 @@ if (!empty($headerUrl)) {
     }
 }
 
-// Top margin = image top offset + image height + separator gap
-$PAGE_MARGIN_TOP = $HEADER_IMG_TOP + $headerImgH + 7;
+// Top margin = image top offset + image height + separator line gap
+$PAGE_MARGIN_TOP = $HEADER_IMG_TOP + $headerImgH + 5;
 
 // Track all temp files to clean up at the end
 $tempFiles = [];
@@ -243,8 +242,8 @@ class EventReportPDF extends TCPDF {
     public float  $hdrImgH    = 32;
 
     /**
-     * TCPDF calls this automatically at the top of EVERY page.
-     * Drawing the image here guarantees it appears on all pages.
+     * Called automatically by TCPDF at the top of EVERY page.
+     * ONE separator line only — no double line.
      */
     public function Header(): void {
         if (!empty($this->hdrImgPath) && file_exists($this->hdrImgPath)) {
@@ -269,16 +268,17 @@ class EventReportPDF extends TCPDF {
             );
         }
 
-        // Thin separator line below the header image
+        // Single thin separator line — drawn just below the header image
         $lineY = $this->hdrImgTop + $this->hdrImgH + 2;
         $this->SetLineWidth(0.4);
-        $this->SetDrawColor(160, 160, 160);
+        $this->SetDrawColor(150, 150, 150);
         $this->Line(
             $this->hdrImgLeft,
             $lineY,
             $this->getPageWidth() - $this->hdrImgLeft,
             $lineY
         );
+        // Reset so content drawing below isn't affected
         $this->SetDrawColor(0, 0, 0);
         $this->SetLineWidth(0.2);
     }
@@ -300,21 +300,21 @@ $pdf->SetAuthor('Keystone School of Engineering');
 $pdf->SetTitle('Event Report - ' . $programme_name);
 $pdf->SetSubject('Event Report');
 
-// CRITICAL: both must be true for Header() to fire on every page
+// Both must be true for Header() to fire on every page
 $pdf->setPrintHeader(true);
 $pdf->setPrintFooter(true);
 
-// SetHeaderMargin(0) = we handle spacing ourselves via $PAGE_MARGIN_TOP
+// SetHeaderMargin(0): we handle all spacing via $PAGE_MARGIN_TOP
 $pdf->SetHeaderMargin(0);
 $pdf->SetFooterMargin(10);
 
-// Top margin accounts for the header image on every page
+// Top margin reserves space for the header image on every page
 $pdf->SetMargins($PAGE_MARGIN_LEFT, $PAGE_MARGIN_TOP, $PAGE_MARGIN_RIGHT);
 $pdf->SetAutoPageBreak(true, $PAGE_MARGIN_BOTTOM);
 $pdf->setImageScale(PDF_IMAGE_SCALE_RATIO);
 $pdf->setJPEGQuality(90);
 
-// Pass header image info into the instance
+// Pass header image details into the instance
 $pdf->hdrImgPath = $headerTmpPath ?: '';
 $pdf->hdrImgLeft = $HEADER_IMG_LEFT;
 $pdf->hdrImgTop  = $HEADER_IMG_TOP;
@@ -388,7 +388,7 @@ if (!empty($guests)) {
             $g['guest_email']  ?? '—',
         ];
 
-        // Calculate row height: tallest cell determines row height
+        // Row height = tallest cell
         $rowH = 7;
         foreach ($row as $ci => $cellText) {
             $lines = $pdf->getNumLines($cellText, $colW[$ci] - 2);
@@ -401,11 +401,7 @@ if (!empty($guests)) {
             $pdf->AddPage();
         }
 
-        if ($rowIdx % 2 === 0) {
-            $pdf->SetFillColor(240, 244, 248);
-        } else {
-            $pdf->SetFillColor(255, 255, 255);
-        }
+        $pdf->SetFillColor($rowIdx % 2 === 0 ? 240 : 255, $rowIdx % 2 === 0 ? 244 : 255, $rowIdx % 2 === 0 ? 248 : 255);
 
         foreach ($row as $ci => $cellText) {
             $pdf->MultiCell($colW[$ci], $rowH, $cellText, 1, 'L', true, 0, '', '', true, 0, false, true, $rowH, 'M');
@@ -440,10 +436,10 @@ if (!empty($photos)) {
 
     // Two-column gallery
     $colCount = 2;
-    $gap      = 6;                                      // mm between columns
-    $imgW     = ($usableW - $gap) / $colCount;         // ~84 mm
-    $imgH     = $imgW * 0.72;                          // proportional height
-    $capSpace = 12;                                     // mm below image for caption
+    $gap      = 6;
+    $imgW     = ($usableW - $gap) / $colCount;   // ~84 mm
+    $imgH     = $imgW * 0.72;
+    $capSpace = 12;
     $blockH   = $imgH + $capSpace;
 
     $col       = 0;
@@ -453,12 +449,12 @@ if (!empty($photos)) {
         $photo_url = buildImagePath($photo_db_value);
         if (empty($photo_url)) continue;
 
-        // Download photo to temp file for reliable rendering
+        // Download photo to temp file
         $tmpPhoto = fetchImageToTemp($photo_url);
         if (!$tmpPhoto || !file_exists($tmpPhoto)) continue;
         $tempFiles[] = $tmpPhoto;
 
-        // At the start of each new row: check if the block fits on this page
+        // Check if new row fits on current page
         if ($col === 0) {
             $rowStartY = $pdf->GetY();
             if ($rowStartY + $blockH > ($pdf->getPageHeight() - $PAGE_MARGIN_BOTTOM)) {
@@ -487,7 +483,7 @@ if (!empty($photos)) {
         }
     }
 
-    // If last row had only one image, still move cursor down
+    // Last row had only one image
     if ($col !== 0) {
         $pdf->SetXY($PAGE_MARGIN_LEFT, $rowStartY + $blockH);
     }
@@ -502,12 +498,10 @@ if (!empty($photos)) {
 $pdf->AddPage();
 $pdf->SetAutoPageBreak(false);
 
-$pdf->Ln(8);
-$pdf->SetFont('helvetica', 'B', 14);
-$pdf->Cell(0, 10, 'Approved By', 0, 1, 'C');
-$pdf->Ln(10);
+// ── No "Approved By" heading — straight to signatures ──────────
+$pdf->Ln(20);
 
-// Build signatories list — HOD only if single department (mirrors view page)
+// Build signatories — HOD only if single department
 $signatories = [];
 $signatories[] = [
     'name'  => $coordinator_name,
@@ -542,13 +536,13 @@ unset($s);
 
 $count   = count($signatories);
 $sigColW = $usableW / $count;
-$sigSize = 35;   // mm — signature image width
+$sigSize = 35;
 $baseY   = $pdf->GetY();
 
 foreach ($signatories as $i => $s) {
     $x = $PAGE_MARGIN_LEFT + $i * $sigColW;
 
-    // Signature image centered in its column
+    // Signature image centered in column
     if (!empty($s['path']) && file_exists($s['path'])) {
         $imgX = $x + ($sigColW - $sigSize) / 2;
         $pdf->Image($s['path'], $imgX, $baseY, $sigSize, 0, '', '', 'T', false, 300);
@@ -565,7 +559,7 @@ foreach ($signatories as $i => $s) {
     $pdf->SetXY($x, $lineY + 3);
     $pdf->Cell($sigColW, 7, $s['name'], 0, 0, 'C');
 
-    // Role title
+    // Role
     $pdf->SetFont('helvetica', 'I', 10);
     $pdf->SetXY($x, $lineY + 11);
     $pdf->Cell($sigColW, 6, $s['title'], 0, 0, 'C');
