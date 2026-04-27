@@ -1,5 +1,15 @@
 <?php require_once __DIR__ . '/layouts/header.php'; ?>
 
+<style>
+/* ================= CAROUSEL IMAGE FIX ================= */
+.carousel-img {
+    width: 100%;
+    max-height: 400px;
+    object-fit: contain; /* default: show full image */
+    background-color: #000; /* fills empty space nicely */
+}
+</style>
+
 <div class="page-bg">
     <div class="overlay row">
 
@@ -14,8 +24,7 @@
                             <div class="carousel-item <?= $index === 0 ? 'active' : '' ?>">
                                 <?php if (!empty($event['image_path'])): ?>
                                     <img src="<?= htmlspecialchars($event['image_path']) ?>"
-                                         class="d-block w-100"
-                                         style="height:400px; object-fit:cover;">
+                                         class="d-block w-100 carousel-img">
                                 <?php else: ?>
                                     <div style="height:400px; background:#333; color:white; display:flex; align-items:center; justify-content:center;">
                                         <?= htmlspecialchars($event['event_name']) ?>
@@ -49,33 +58,32 @@
         <?php endif; ?>
 
 
-
         <!-- ================= HEADING ================= -->
         <h2 class="page-title">Event Report</h2>
 
         <!-- ================= CONTENT ================= -->
         <div class="container">
-                    <div class="content-card">
+            <div class="content-card">
 
-                    <div class="search-bar">
-            <input type="text" id="searchYear" class="form-control"
-                placeholder="Search by Year (e.g. 2024)">
-            <select id="searchMonth" class="form-control">
-                <option value="">All Months</option>
-                <option value="01">January</option>
-                <option value="02">February</option>
-                <option value="03">March</option>
-                <option value="04">April</option>
-                <option value="05">May</option>
-                <option value="06">June</option>
-                <option value="07">July</option>
-                <option value="08">August</option>
-                <option value="09">September</option>
-                <option value="10">October</option>
-                <option value="11">November</option>
-                <option value="12">December</option>
-            </select>
-        </div>
+                <div class="search-bar">
+                    <input type="text" id="searchYear" class="form-control"
+                        placeholder="Search by Year (e.g. 2024)">
+                    <select id="searchMonth" class="form-control">
+                        <option value="">All Months</option>
+                        <option value="01">January</option>
+                        <option value="02">February</option>
+                        <option value="03">March</option>
+                        <option value="04">April</option>
+                        <option value="05">May</option>
+                        <option value="06">June</option>
+                        <option value="07">July</option>
+                        <option value="08">August</option>
+                        <option value="09">September</option>
+                        <option value="10">October</option>
+                        <option value="11">November</option>
+                        <option value="12">December</option>
+                    </select>
+                </div>
 
                 <?php if (!empty($errors)): ?>
                     <div class="alert alert-danger">
@@ -129,7 +137,9 @@
 
     </div>
 </div>
+
 <script>
+/* ================= FILTER EVENTS ================= */
 const yearInput  = document.getElementById("searchYear");
 const monthSelect = document.getElementById("searchMonth");
 const rows       = document.querySelectorAll("#eventsTable tbody tr");
@@ -139,7 +149,7 @@ function filterEvents() {
     const month = monthSelect.value;
 
     rows.forEach(row => {
-        const date     = row.dataset.date;
+        const date = row.dataset.date;
         if (!date) {
             row.style.display = "none";
             return;
@@ -157,6 +167,18 @@ function filterEvents() {
 
 yearInput.addEventListener("input", filterEvents);
 monthSelect.addEventListener("change", filterEvents);
+
+
+/* ================= SMART IMAGE FIT ================= */
+document.querySelectorAll('.carousel-img').forEach(img => {
+    img.onload = function () {
+        if (this.naturalHeight > this.naturalWidth) {
+            this.style.objectFit = "contain"; // vertical image
+        } else {
+            this.style.objectFit = "cover";   // horizontal image
+        }
+    }
+});
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
