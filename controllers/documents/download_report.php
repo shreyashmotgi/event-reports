@@ -4,7 +4,7 @@
  * - Header image on EVERY page
  * - Cloudinary image URLs supported
  * - Layout mirrors view_eventreport.php exactly
- * - Photos: one per page, full-width, centred vertically
+ * - Photos: 2 per page, single column, one below the other
  */
 
 // -------------------- SESSION --------------------
@@ -38,9 +38,6 @@ function normalizePath($path) {
     return ltrim($path, '/');
 }
 
-/**
- * Return full Cloudinary URL as-is, or build absolute URL for relative paths.
- */
 function buildImagePath($image_value) {
     if (empty($image_value)) return '';
     if (filter_var($image_value, FILTER_VALIDATE_URL) && stripos($image_value, 'https://res.cloudinary.com') === 0) {
@@ -49,11 +46,6 @@ function buildImagePath($image_value) {
     return 'https://event-reports-production.up.railway.app/' . ltrim($image_value, '/');
 }
 
-/**
- * Download a remote image URL into a temp file and return its local path.
- * TCPDF renders remote images much more reliably when given a local file.
- * Returns '' if the download fails.
- */
 function fetchImageToTemp($url) {
     if (empty($url)) return '';
 
@@ -111,7 +103,7 @@ try {
     $notice_stmt->execute();
     $notice = $notice_stmt->get_result()->fetch_assoc();
 
-    // Guests — all 4 columns matching view page
+    // Guests
     $guest_stmt = $conn->prepare("
         SELECT guest_name, company_name, designation, guest_email
         FROM checklist_guests WHERE checklist_id = ?
@@ -168,7 +160,7 @@ try {
     $coordinator_name = $pc['username']   ?? 'Coordinator';
     $coordinator_sign = $pc['sign_image'] ?? '';
 
-    // HOD — only if single department (mirrors view page)
+    // HOD
     $hod_name = '';
     $hod_sign = '';
     if (is_array($deptArray) && count($deptArray) === 1) {
@@ -197,9 +189,9 @@ try {
 }
 
 // ==================== PRE-DOWNLOAD HEADER IMAGE ====================
-$HEADER_IMG_LEFT  = 15;   // mm from left edge
-$HEADER_IMG_TOP   = 8;    // mm from top edge
-$HEADER_IMG_WIDTH = 180;  // mm (210 - 15 - 15)
+$HEADER_IMG_LEFT  = 15;
+$HEADER_IMG_TOP   = 8;
+$HEADER_IMG_WIDTH = 180;
 
 $PAGE_MARGIN_LEFT   = 18;
 $PAGE_MARGIN_RIGHT  = 18;
@@ -209,7 +201,7 @@ $usableW = 210 - $PAGE_MARGIN_LEFT - $PAGE_MARGIN_RIGHT; // 174 mm
 
 $headerUrl     = buildImagePath($header_image);
 $headerTmpPath = '';
-$headerImgH    = 32; // safe default mm height
+$headerImgH    = 32;
 
 if (!empty($headerUrl)) {
     $headerTmpPath = fetchImageToTemp($headerUrl);
@@ -221,10 +213,8 @@ if (!empty($headerUrl)) {
     }
 }
 
-// Top margin = image top offset + image height + separator line gap
 $PAGE_MARGIN_TOP = $HEADER_IMG_TOP + $headerImgH + 5;
 
-// Track all temp files to clean up at the end
 $tempFiles = [];
 if ($headerTmpPath) $tempFiles[] = $headerTmpPath;
 
@@ -239,9 +229,6 @@ class EventReportPDF extends TCPDF {
     public float  $hdrImgW    = 180;
     public float  $hdrImgH    = 32;
 
-    /**
-     * Called automatically by TCPDF at the top of EVERY page.
-     */
     public function Header(): void {
         if (!empty($this->hdrImgPath) && file_exists($this->hdrImgPath)) {
             $this->Image(
@@ -250,22 +237,11 @@ class EventReportPDF extends TCPDF {
                 $this->hdrImgTop,
                 $this->hdrImgW,
                 $this->hdrImgH,
-                '',
-                '',
-                'T',
-                false,
-                300,
-                '',
-                false,
-                false,
-                0,
-                false,
-                false,
-                false
+                '', '', 'T', false, 300,
+                '', false, false, 0, false, false, false
             );
         }
 
-        // Single thin separator line — drawn just below the header image
         $lineY = $this->hdrImgTop + $this->hdrImgH + 2;
         $this->SetLineWidth(0.4);
         $this->SetDrawColor(150, 150, 150);
@@ -298,10 +274,8 @@ $pdf->SetSubject('Event Report');
 
 $pdf->setPrintHeader(true);
 $pdf->setPrintFooter(true);
-
 $pdf->SetHeaderMargin(0);
 $pdf->SetFooterMargin(10);
-
 $pdf->SetMargins($PAGE_MARGIN_LEFT, $PAGE_MARGIN_TOP, $PAGE_MARGIN_RIGHT);
 $pdf->SetAutoPageBreak(true, $PAGE_MARGIN_BOTTOM);
 $pdf->setImageScale(PDF_IMAGE_SCALE_RATIO);
@@ -336,12 +310,10 @@ function pdfSection(EventReportPDF $pdf, string $title, string $html): void {
 // ==================== PAGE 1 — EVENT DETAILS ====================
 $pdf->AddPage();
 
-// Title
 $pdf->SetFont('helvetica', 'B', 16);
 $pdf->Cell(0, 10, 'EVENT REPORT', 0, 1, 'C');
 $pdf->Ln(6);
 
-// Basic event info
 pdfLabel($pdf, 'Name of Event', $programme_name);
 pdfLabel($pdf, 'Day & Date',    $event_date);
 pdfLabel($pdf, 'Time',          $event_time);
@@ -388,7 +360,11 @@ if (!empty($guests)) {
             $pdf->AddPage();
         }
 
-        $pdf->SetFillColor($rowIdx % 2 === 0 ? 240 : 255, $rowIdx % 2 === 0 ? 244 : 255, $rowIdx % 2 === 0 ? 248 : 255);
+        $pdf->SetFillColor(
+            $rowIdx % 2 === 0 ? 240 : 255,
+            $rowIdx % 2 === 0 ? 244 : 255,
+            $rowIdx % 2 === 0 ? 248 : 255
+        );
 
         foreach ($row as $ci => $cellText) {
             $pdf->MultiCell($colW[$ci], $rowH, $cellText, 1, 'L', true, 0, '', '', true, 0, false, true, $rowH, 'M');
@@ -413,42 +389,78 @@ foreach ($sections as $title => $html) {
     pdfSection($pdf, $title, $html);
 }
 
-// ==================== PHOTOS ====================
+// ==================== PHOTOS — 2 per page, single column, stacked ====================
 if (!empty($photos)) {
 
-    // ── Single-column gallery — one image per page, full-width ──
-    $imgW     = $usableW;        // full usable width ~174 mm
-    $imgH     = $imgW * 0.65;    // ~113 mm tall (landscape feel)
-    $capSpace = 14;              // space below image reserved for caption
+    // ── Layout: 2 photos stacked vertically per page ────────────
+    // Image fills full usable width; height is half the usable page
+    // area minus gaps and caption space.
+    $photosPerPage = 2;
+    $rowGap        = 8;    // mm between the two photos
+    $capH          = 10;   // mm reserved below each image for caption
 
+    $imgW = $usableW;      // full page width — centred
+
+    // Usable vertical area on a photo page
+    $usablePageH = $pdf->getPageHeight() - $PAGE_MARGIN_TOP - $PAGE_MARGIN_BOTTOM;
+
+    // Each image gets half the space minus gaps and captions
+    $imgH = ($usablePageH - $rowGap - $capH * $photosPerPage) / $photosPerPage;
+    $imgH = min($imgH, 110); // cap so it doesn't get absurdly tall on short content
+
+    // Total height used by one photo block (image + caption gap + caption)
+    $blockH = $imgH + $capH;
+
+    // ── Pre-download all valid photos ───────────────────────────
+    $photoItems = [];
     foreach ($photos as $idx => $photo_db_value) {
         $photo_url = buildImagePath($photo_db_value);
         if (empty($photo_url)) continue;
 
         $tmpPhoto = fetchImageToTemp($photo_url);
         if (!$tmpPhoto || !file_exists($tmpPhoto)) continue;
-        $tempFiles[] = $tmpPhoto;
 
-        // Each photo gets its own dedicated page
-        $pdf->AddPage();
+        $tempFiles[]  = $tmpPhoto;
+        $photoItems[] = [
+            'path'    => $tmpPhoto,
+            'caption' => trim($captions[$idx] ?? ''),
+        ];
+    }
 
-        $pageH       = $pdf->getPageHeight();
-        $usablePageH = $pageH - $PAGE_MARGIN_TOP - $PAGE_MARGIN_BOTTOM;
-        $blockH      = $imgH + $capSpace;
+    if (!empty($photoItems)) {
 
-        // Centre the image block vertically within the usable area
-        $centredY = $PAGE_MARGIN_TOP + ($usablePageH - $blockH) / 2;
-        if ($centredY < $PAGE_MARGIN_TOP) $centredY = $PAGE_MARGIN_TOP;
+        // Split into groups of 2 — each group = one page
+        $pages = array_chunk($photoItems, $photosPerPage);
 
-        // Draw image — high DPI for maximum sharpness
-        $pdf->Image($tmpPhoto, $PAGE_MARGIN_LEFT, $centredY, $imgW, $imgH, '', '', 'T', false, 200);
+        $firstPhotoPage = true;
 
-        // Caption centred beneath the image
-        $caption = trim($captions[$idx] ?? '');
-        if ($caption !== '') {
-            $pdf->SetFont('helvetica', 'I', 10);
-            $pdf->SetXY($PAGE_MARGIN_LEFT, $centredY + $imgH + 3);
-            $pdf->MultiCell($imgW, 6, $caption, 0, 'C');
+        foreach ($pages as $pagePhotos) {
+            $pdf->AddPage();
+
+            // "Photos" heading only on the very first photo page
+            if ($firstPhotoPage) {
+                $pdf->SetFont('helvetica', 'B', 14);
+                $pdf->Cell(0, 10, 'Photos', 0, 1, 'C');
+                $pdf->Ln(4);
+                $firstPhotoPage = false;
+            }
+
+            $pageStartY = $pdf->GetY();
+
+            foreach ($pagePhotos as $pos => $item) {
+                // pos 0 = top photo, pos 1 = bottom photo
+                $y = $pageStartY + $pos * ($blockH + $rowGap);
+
+                // Draw image — centred horizontally (x = left margin)
+                $pdf->Image($item['path'], $PAGE_MARGIN_LEFT, $y, $imgW, $imgH, '', '', 'T', false, 150);
+
+                // Caption below the image
+                if ($item['caption'] !== '') {
+                    $pdf->SetFont('helvetica', 'I', 10);
+                    $pdf->SetXY($PAGE_MARGIN_LEFT, $y + $imgH + 2);
+                    $pdf->MultiCell($imgW, 5, $item['caption'], 0, 'C');
+                }
+            }
         }
     }
 
@@ -522,7 +534,7 @@ foreach ($signatories as $i => $s) {
     $pdf->Cell($sigColW, 6, $s['title'], 0, 0, 'C');
 }
 
-// Institute footer — pinned to bottom of last page
+// Institute footer
 $pdf->SetY(-22);
 $pdf->SetLineWidth(0.3);
 $pdf->SetDrawColor(100, 100, 100);
@@ -542,7 +554,6 @@ header('Expires: 0');
 
 $output = $pdf->Output('Event_Report_' . $checklist_id . '.pdf', 'S');
 
-// Clean up all temp files
 foreach ($tempFiles as $tmp) {
     if ($tmp && file_exists($tmp)) @unlink($tmp);
 }
