@@ -4,7 +4,7 @@
  * - Header image on EVERY page
  * - Cloudinary image URLs supported
  * - Layout mirrors view_eventreport.php exactly
- * - Photos: 2 per page, single column, one below the other
+ * - Photos: EXACTLY 2 per page, single column, one below the other, properly fitted
  */
 
 // -------------------- SESSION --------------------
@@ -197,6 +197,9 @@ $PAGE_MARGIN_LEFT   = 18;
 $PAGE_MARGIN_RIGHT  = 18;
 $PAGE_MARGIN_BOTTOM = 18;
 
+// A4 page height = 297mm
+$PAGE_HEIGHT = 297;
+
 $usableW = 210 - $PAGE_MARGIN_LEFT - $PAGE_MARGIN_RIGHT; // 174 mm
 
 $headerUrl     = buildImagePath($header_image);
@@ -217,6 +220,26 @@ $PAGE_MARGIN_TOP = $HEADER_IMG_TOP + $headerImgH + 5;
 
 $tempFiles = [];
 if ($headerTmpPath) $tempFiles[] = $headerTmpPath;
+
+// ==================== PHOTO LAYOUT CONSTANTS ====================
+// Calculate FIXED image dimensions so exactly 2 photos always fit per page.
+// We do this before TCPDF is even loaded so the numbers are clean.
+
+$PHOTO_PAGE_USABLE_H = $PAGE_HEIGHT - $PAGE_MARGIN_TOP - $PAGE_MARGIN_BOTTOM;
+// Reserve: "Photos" title on first page = 18mm, gap between photos = 10mm, caption per photo = 8mm
+$PHOTO_TITLE_H  = 18;  // mm — heading + spacing, only on first photo page
+$PHOTO_GAP      = 10;  // mm — vertical gap between photo 1 and photo 2
+$PHOTO_CAP_H    = 8;   // mm — caption space below each image
+
+// On first page: 2 images + 1 gap + 2 captions + title
+// imgH = (usable - title - gap - 2*caption) / 2
+$PHOTO_IMG_H_FIRST = ($PHOTO_PAGE_USABLE_H - $PHOTO_TITLE_H - $PHOTO_GAP - 2 * $PHOTO_CAP_H) / 2;
+
+// On subsequent pages: 2 images + 1 gap + 2 captions
+$PHOTO_IMG_H_REST  = ($PHOTO_PAGE_USABLE_H - $PHOTO_GAP - 2 * $PHOTO_CAP_H) / 2;
+
+// Image width = full usable width
+$PHOTO_IMG_W = $usableW; // 174 mm
 
 // ==================== CUSTOM TCPDF CLASS ====================
 require_once __DIR__ . '/../../tcpdf/tcpdf.php';
@@ -389,29 +412,10 @@ foreach ($sections as $title => $html) {
     pdfSection($pdf, $title, $html);
 }
 
-// ==================== PHOTOS — 2 per page, single column, stacked ====================
+// ==================== PHOTOS — exactly 2 per page, stacked ====================
 if (!empty($photos)) {
 
-    // ── Layout: 2 photos stacked vertically per page ────────────
-    // Image fills full usable width; height is half the usable page
-    // area minus gaps and caption space.
-    $photosPerPage = 2;
-    $rowGap        = 8;    // mm between the two photos
-    $capH          = 10;   // mm reserved below each image for caption
-
-    $imgW = $usableW;      // full page width — centred
-
-    // Usable vertical area on a photo page
-    $usablePageH = $pdf->getPageHeight() - $PAGE_MARGIN_TOP - $PAGE_MARGIN_BOTTOM;
-
-    // Each image gets half the space minus gaps and captions
-    $imgH = ($usablePageH - $rowGap - $capH * $photosPerPage) / $photosPerPage;
-    $imgH = min($imgH, 110); // cap so it doesn't get absurdly tall on short content
-
-    // Total height used by one photo block (image + caption gap + caption)
-    $blockH = $imgH + $capH;
-
-    // ── Pre-download all valid photos ───────────────────────────
+    // Pre-download ALL photos first so we only draw pages for photos that exist
     $photoItems = [];
     foreach ($photos as $idx => $photo_db_value) {
         $photo_url = buildImagePath($photo_db_value);
@@ -429,39 +433,55 @@ if (!empty($photos)) {
 
     if (!empty($photoItems)) {
 
-        // Split into groups of 2 — each group = one page
-        $pages = array_chunk($photoItems, $photosPerPage);
-
-        $firstPhotoPage = true;
+        // Split into pages of exactly 2
+        $pages          = array_chunk($photoItems, 2);
+        $isFirstPhotoPage = true;
 
         foreach ($pages as $pagePhotos) {
-            $pdf->AddPage();
 
-            // "Photos" heading only on the very first photo page
-            if ($firstPhotoPage) {
+            $pdf->AddPage();
+            // Disable auto page break inside photo pages — we control Y manually
+            $pdf->SetAutoPageBreak(false, 0);
+
+            // ── "Photos" title — only on very first photo page ──
+            if ($isFirstPhotoPage) {
                 $pdf->SetFont('helvetica', 'B', 14);
                 $pdf->Cell(0, 10, 'Photos', 0, 1, 'C');
                 $pdf->Ln(4);
-                $firstPhotoPage = false;
+                $isFirstPhotoPage = false;
+                $imgH = $PHOTO_IMG_H_FIRST;
+            } else {
+                $imgH = $PHOTO_IMG_H_REST;
             }
 
-            $pageStartY = $pdf->GetY();
+            // Starting Y for the first photo on this page
+            $startY = $pdf->GetY();
 
             foreach ($pagePhotos as $pos => $item) {
                 // pos 0 = top photo, pos 1 = bottom photo
-                $y = $pageStartY + $pos * ($blockH + $rowGap);
+                $y = $startY + $pos * ($imgH + $PHOTO_CAP_H + $PHOTO_GAP);
 
-                // Draw image — centred horizontally (x = left margin)
-                $pdf->Image($item['path'], $PAGE_MARGIN_LEFT, $y, $imgW, $imgH, '', '', 'T', false, 150);
+                // Draw image — full width, fixed height
+                $pdf->Image(
+                    $item['path'],
+                    $PAGE_MARGIN_LEFT,
+                    $y,
+                    $PHOTO_IMG_W,
+                    $imgH,
+                    '', '', 'T', false, 150
+                );
 
-                // Caption below the image
+                // Caption centred below the image
                 if ($item['caption'] !== '') {
                     $pdf->SetFont('helvetica', 'I', 10);
-                    $pdf->SetXY($PAGE_MARGIN_LEFT, $y + $imgH + 2);
-                    $pdf->MultiCell($imgW, 5, $item['caption'], 0, 'C');
+                    $pdf->SetXY($PAGE_MARGIN_LEFT, $y + $imgH + 1);
+                    $pdf->MultiCell($PHOTO_IMG_W, 6, $item['caption'], 0, 'C');
                 }
             }
         }
+
+        // Re-enable auto page break for the signatures page
+        $pdf->SetAutoPageBreak(true, $PAGE_MARGIN_BOTTOM);
     }
 
 } else {
