@@ -1,10 +1,10 @@
 <?php require_once __DIR__ . '/layouts/header.php'; ?>
-
+<br><br>
 <!-- ================= CAROUSEL (Full Width, outside overlay) ================= -->
 <?php if (!empty($upcomingEvents)): ?>
     <div id="upcomingEventsCarousel" class="carousel slide" data-bs-ride="carousel">
         <div class="carousel-inner">
-            <br><br>
+            
             <?php foreach ($upcomingEvents as $index => $event): ?>
                 <div class="carousel-item <?= $index === 0 ? 'active' : '' ?>">
                     <?php if (!empty($event['image_path'])): ?>
