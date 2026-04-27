@@ -1,12 +1,37 @@
 <?php require_once __DIR__ . '/layouts/header.php'; ?>
 
 <style>
-/* ================= CAROUSEL IMAGE FIX ================= */
-.carousel-img {
+/* ================= CAROUSEL IMAGE (PRO LEVEL UI) ================= */
+
+.carousel-image-wrapper {
+    position: relative;
     width: 100%;
-    max-height: 400px;
-    object-fit: contain; /* default: show full image */
-    background-color: #000; /* fills empty space nicely */
+    height: 400px;
+    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+/* Blurred background */
+.carousel-bg {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(20px);
+    transform: scale(1.1);
+    opacity: 0.6;
+}
+
+/* Main image */
+.carousel-img {
+    position: relative;
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+    margin: auto;
+    display: block;
+    z-index: 2;
 }
 </style>
 
@@ -20,15 +45,26 @@
 
                 <div id="upcomingEventsCarousel" class="carousel slide" data-bs-ride="carousel">
                     <div class="carousel-inner">
+
                         <?php foreach ($upcomingEvents as $index => $event): ?>
                             <div class="carousel-item <?= $index === 0 ? 'active' : '' ?>">
+
                                 <?php if (!empty($event['image_path'])): ?>
-                                    <img src="<?= htmlspecialchars($event['image_path']) ?>"
-                                         class="d-block w-100 carousel-img">
+
+                                    <div class="carousel-image-wrapper">
+                                        <!-- Blurred Background -->
+                                        <img src="<?= htmlspecialchars($event['image_path']) ?>" class="carousel-bg">
+
+                                        <!-- Main Image -->
+                                        <img src="<?= htmlspecialchars($event['image_path']) ?>" class="carousel-img">
+                                    </div>
+
                                 <?php else: ?>
+
                                     <div style="height:400px; background:#333; color:white; display:flex; align-items:center; justify-content:center;">
                                         <?= htmlspecialchars($event['event_name']) ?>
                                     </div>
+
                                 <?php endif; ?>
 
                                 <div class="carousel-caption d-none d-md-block">
@@ -40,10 +76,13 @@
                                         <?php endif; ?>
                                     </p>
                                 </div>
+
                             </div>
                         <?php endforeach; ?>
+
                     </div>
 
+                    <!-- Controls -->
                     <button class="carousel-control-prev" type="button"
                             data-bs-target="#upcomingEventsCarousel" data-bs-slide="prev">
                         <span class="carousel-control-prev-icon"></span>
@@ -53,6 +92,7 @@
                             data-bs-target="#upcomingEventsCarousel" data-bs-slide="next">
                         <span class="carousel-control-next-icon"></span>
                     </button>
+
                 </div>
             </div>
         <?php endif; ?>
@@ -65,9 +105,11 @@
         <div class="container">
             <div class="content-card">
 
+                <!-- Search -->
                 <div class="search-bar">
                     <input type="text" id="searchYear" class="form-control"
                         placeholder="Search by Year (e.g. 2024)">
+
                     <select id="searchMonth" class="form-control">
                         <option value="">All Months</option>
                         <option value="01">January</option>
@@ -85,6 +127,7 @@
                     </select>
                 </div>
 
+                <!-- Errors -->
                 <?php if (!empty($errors)): ?>
                     <div class="alert alert-danger">
                         <ul>
@@ -95,6 +138,7 @@
                     </div>
                 <?php endif; ?>
 
+                <!-- Table -->
                 <table id="eventsTable" class="table table-hover">
                     <thead class="table-dark">
                         <tr>
@@ -107,6 +151,7 @@
                     <tbody>
                         <?php if (!empty($eventReports)): ?>
                             <?php foreach ($eventReports as $row): ?>
+
                                 <?php
                                 $date = $row['multi_day']
                                     ? $row['programme_start_date']
@@ -123,6 +168,7 @@
                                         </a>
                                     </td>
                                 </tr>
+
                             <?php endforeach; ?>
                         <?php else: ?>
                             <tr>
@@ -150,6 +196,7 @@ function filterEvents() {
 
     rows.forEach(row => {
         const date = row.dataset.date;
+
         if (!date) {
             row.style.display = "none";
             return;
@@ -167,18 +214,6 @@ function filterEvents() {
 
 yearInput.addEventListener("input", filterEvents);
 monthSelect.addEventListener("change", filterEvents);
-
-
-/* ================= SMART IMAGE FIT ================= */
-document.querySelectorAll('.carousel-img').forEach(img => {
-    img.onload = function () {
-        if (this.naturalHeight > this.naturalWidth) {
-            this.style.objectFit = "contain"; // vertical image
-        } else {
-            this.style.objectFit = "cover";   // horizontal image
-        }
-    }
-});
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
